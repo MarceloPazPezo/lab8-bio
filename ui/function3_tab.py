@@ -320,11 +320,20 @@ class Function3Tab(ttk.Frame):
             # Para pasos siguientes: viz_substep 1=uniones, 2=ciclos
             viz_step = viz_substep if viz_substep <= 2 else 2
             
+            # Obtener el rango de reversión si existe
+            # La reversión en el paso i se aplica para ir del paso i al paso i+1
+            # Si estamos mostrando el paso algorithm_step, queremos mostrar la reversión que se aplica
+            # desde este paso (reversions[algorithm_step]), no la que se aplicó para llegar aquí
+            reversal_range = None
+            if algorithm_step < len(self.current_result['reversions']):
+                reversal_range = self.current_result['reversions'][algorithm_step]
+            
             # Crear el diagrama sin título
             fig, ax = create_expanded_sequence_diagram(
                 expanded, 
                 title="",  # Sin título
-                step=viz_step
+                step=viz_step,
+                reversal_range=reversal_range
             )
             
             # Integrar en tkinter

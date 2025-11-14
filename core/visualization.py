@@ -10,7 +10,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 
 
-def create_expanded_sequence_diagram(sequence: List[str], ax=None, title: str = "Secuencia Expandida", step: int = 0):
+def create_expanded_sequence_diagram(sequence: List[str], ax=None, title: str = "Secuencia Expandida", step: int = 0, reversal_range: Tuple[int, int] = None):
     """
     Crea un diagrama visual de una secuencia expandida con L/R.
     
@@ -22,6 +22,7 @@ def create_expanded_sequence_diagram(sequence: List[str], ax=None, title: str = 
         ax: Eje de matplotlib (si None, se crea uno nuevo)
         title: Título del diagrama
         step: Paso de visualización (0 = solo nodos, 1 = nodos + arcos rectos)
+        reversal_range: Tupla (i, j) indicando el rango de reversión en la secuencia original (None si no hay reversión)
         
     Returns:
         Figura y eje de matplotlib
@@ -69,6 +70,58 @@ def create_expanded_sequence_diagram(sequence: List[str], ax=None, title: str = 
     if step >= 2:
         # Paso 2: Dibujar ciclos con arcos y flechas
         _draw_cycle_arcs(ax, sequence, x_positions, y_base)
+    
+    # Dibujar líneas verticales para mostrar el rango de reversión solo en paso 2 o superior
+    if reversal_range is not None and step >= 2:
+        i, j = reversal_range
+        # Mapear el rango de la secuencia original a la secuencia expandida
+        # La secuencia expandida tiene: L (0), (-n, +n) (1,2), (-m, +m) (3,4), ..., R
+        # La primera línea vertical debe estar ANTES del primer nodo del rango (elemento i)
+        # La segunda línea vertical debe estar DESPUÉS del último nodo del rango (elemento j)
+        if i is not None and j is not None:
+            # Calcular número de elementos originales (sin contar L y R)
+            num_original_elements = (n - 2) // 2  # (n - 2) porque L y R, luego dividir por 2
+            
+            # Línea vertical izquierda: unión ANTES del elemento i
+            if i > 0:
+                # Unión del elemento anterior (i-1)
+                # El elemento i-1 está en las posiciones 1+(i-1)*2 y 2+(i-1)*2
+                expanded_start_left = 2 + (i - 1) * 2
+                expanded_start_right = 3 + (i - 1) * 2
+                x_start = (x_positions[expanded_start_left] + x_positions[expanded_start_right]) / 2
+            else:
+                # Si i == 0, la unión anterior está entre L (0) y el primer nodo (1)
+                x_start = (x_positions[0] + x_positions[1]) / 2
+            
+            # Línea vertical derecha: unión DESPUÉS del elemento j
+            if j < num_original_elements - 1:
+                # Unión del elemento siguiente (j+1)
+                # El elemento j+1 está en las posiciones 1+(j+1)*2 y 2+(j+1)*2
+                expanded_end_left = 0 + (j + 1) * 2
+                expanded_end_right = 1 + (j + 1) * 2
+                x_end = (x_positions[expanded_end_left] + x_positions[expanded_end_right]) / 2
+            else:
+                # Si j es el último elemento, la unión siguiente está entre el último nodo del último par y R
+                # El último par está en las posiciones n-3 y n-2, R está en n-1
+                # La unión después está en el centro entre n-2 y n-1
+                if n >= 3:
+                    x_end = (x_positions[n - 2] + x_positions[n - 1]) / 2
+                else:
+                    x_end = x_positions[n - 1]  # Si solo hay L y R
+            
+            # Dibujar líneas verticales en los extremos del rango
+            # Línea vertical izquierda (antes del primer nodo del rango)
+            ax.plot([x_start, x_start], [y_base - 0.35, y_base + 0.35], 
+                   'r-', linewidth=3, zorder=5, alpha=0.7)
+            # Línea vertical derecha (después del último nodo del rango)
+            ax.plot([x_end, x_end], [y_base - 0.35, y_base + 0.35], 
+                   'r-', linewidth=3, zorder=5, alpha=0.7)
+            
+            # Opcional: dibujar una línea horizontal conectando las dos verticales
+            ax.plot([x_start, x_end], [y_base - 0.35, y_base - 0.35], 
+                   'r--', linewidth=2, zorder=5, alpha=0.5)
+            ax.plot([x_start, x_end], [y_base + 0.35, y_base + 0.35], 
+                   'r--', linewidth=2, zorder=5, alpha=0.5)
     
     # Configurar el eje
     ax.set_xlim(0, 10)
@@ -121,7 +174,30 @@ def _draw_cycle_arcs(ax, sequence: List[str], x_positions: np.ndarray, y_base: f
     # Función para obtener el nodo objetivo según las reglas
     def get_target_node(node_idx):
         elem = sequence[node_idx]
-        if elem == 'L' or elem == 'R':
+        
+        # REGLA ESPECIAL PARA R: Se conecta al negativo del mayor valor absoluto
+        if elem == 'R':
+            # Encontrar el mayor valor absoluto en la secuencia
+            max_value = 0
+            max_negative_idx = None
+            for i, e in enumerate(sequence):
+                if e.startswith('-'):
+                    value = int(e[1:])
+                    if value > max_value:
+                        max_value = value
+                        max_negative_idx = i
+            # Si encontramos un negativo, retornar su índice
+            # Luego seguiremos por la unión al positivo correspondiente
+            return max_negative_idx if max_negative_idx is not None else None
+        
+        # REGLA ESPECIAL PARA L: Se conecta al primer elemento negativo (ya implementado al final)
+        # Pero también puede conectarse al negativo del menor valor si es necesario
+        if elem == 'L':
+            # L siempre se conecta al primer elemento negativo (l_idx + 1)
+            if l_idx + 1 < n:
+                first_negative_elem = sequence[l_idx + 1]
+                if first_negative_elem.startswith('-'):
+                    return l_idx + 1
             return None
         
         if elem.startswith('+'):
@@ -172,7 +248,7 @@ def _draw_cycle_arcs(ax, sequence: List[str], x_positions: np.ndarray, y_base: f
             # Verificar si target_idx ya está en este ciclo (ciclo cerrado)
             # Si está, dibujar el arco que cierra el ciclo y terminar
             if target_idx in cycle_nodes:
-                # Dibujar el arco que cierra el ciclo
+                # Dibujar el arco que cierra el ciclo (si no se ha dibujado)
                 arc_key = (current_idx, target_idx)
                 if arc_key not in drawn_arcs:
                     drawn_arcs.add(arc_key)
@@ -215,8 +291,10 @@ def _draw_cycle_arcs(ax, sequence: List[str], x_positions: np.ndarray, y_base: f
                     # El ciclo se cierra volviendo al inicio, ya dibujamos el arco, terminar
                     cycle_should_close = True
                 # Verificar si el nodo del par ya está en OTRO ciclo (verificación GLOBAL)
+                # Si está en otro ciclo, no seguimos desde ahí, pero el arco ya se dibujó
                 elif paired_idx in nodes_in_cycles:
                     # El nodo del par está en otro ciclo, terminar este ciclo
+                    # Pero el arco ya se dibujó, así que está bien
                     cycle_should_close = True
                 else:
                     # Agregar el nodo del par al ciclo y continuar desde ahí
@@ -227,10 +305,45 @@ def _draw_cycle_arcs(ax, sequence: List[str], x_positions: np.ndarray, y_base: f
                     nodes_in_cycles.update(cycle_nodes)
                     break
             elif target_idx == l_idx or target_idx == r_idx:
-                # Si target_idx es L o R y no está en una unión, el ciclo termina aquí
-                # El ciclo termina en L o R, ya dibujamos el arco
-                nodes_in_cycles.update(cycle_nodes)
-                break
+                # Si target_idx es L o R, verificar si tienen un target según las reglas especiales
+                # R se conecta al mayor valor negativo, L se conecta al primer elemento negativo
+                special_target = get_target_node(target_idx)
+                if special_target is not None:
+                    # L o R tienen un target especial, dibujar el arco y continuar el ciclo
+                    # Dibujar arco de L/R hacia el target especial
+                    arc_key = (target_idx, special_target)
+                    if arc_key not in drawn_arcs:
+                        drawn_arcs.add(arc_key)
+                        x1, x2 = x_positions[target_idx], x_positions[special_target]
+                        distance = abs(x2 - x1)
+                        height = 0.4 if distance > 2 else 0.3
+                        _draw_arrow_arc(ax, x1, x2, y_base, height, color='blue', linewidth=2)
+                    
+                    # Agregar L o R y el target especial al ciclo
+                    cycle_nodes.add(target_idx)
+                    cycle_nodes.add(special_target)
+                    
+                    # Verificar si el target especial ya está en el ciclo (ciclo cerrado)
+                    if special_target in cycle_nodes and special_target != target_idx:
+                        # El ciclo se cierra aquí
+                        nodes_in_cycles.update(cycle_nodes)
+                        break
+                    
+                    # Si el target especial está en una unión, seguir por la unión
+                    if special_target in unions:
+                        paired_idx = unions[special_target]
+                        if paired_idx in cycle_nodes:
+                            nodes_in_cycles.update(cycle_nodes)
+                            break
+                        cycle_nodes.add(paired_idx)
+                        current_idx = paired_idx
+                    else:
+                        current_idx = special_target
+                    continue
+                else:
+                    # L o R no tienen target, el ciclo termina aquí
+                    nodes_in_cycles.update(cycle_nodes)
+                    break
             
             # Verificar si el siguiente nodo ya está en este ciclo (ciclo cerrado)
             # IMPORTANTE: Verificar después de agregar paired_idx al ciclo
@@ -240,14 +353,74 @@ def _draw_cycle_arcs(ax, sequence: List[str], x_positions: np.ndarray, y_base: f
                 break
             
             # Verificar si podemos continuar desde next_idx
-            # Si next_idx es L o R y no tiene target, el ciclo termina
-            if (next_idx == l_idx or next_idx == r_idx) and get_target_node(next_idx) is None:
-                # L o R no tiene target, el ciclo termina aquí
-                nodes_in_cycles.update(cycle_nodes)
-                break
+            # Si next_idx es L o R, verificar si tienen target especial
+            if next_idx == l_idx or next_idx == r_idx:
+                special_target = get_target_node(next_idx)
+                if special_target is None:
+                    # L o R no tienen target, el ciclo termina aquí
+                    nodes_in_cycles.update(cycle_nodes)
+                    break
+                # Si tienen target, dibujar el arco y continuar
+                arc_key = (next_idx, special_target)
+                if arc_key not in drawn_arcs:
+                    drawn_arcs.add(arc_key)
+                    x1, x2 = x_positions[next_idx], x_positions[special_target]
+                    distance = abs(x2 - x1)
+                    height = 0.4 if distance > 2 else 0.3
+                    _draw_arrow_arc(ax, x1, x2, y_base, height, color='blue', linewidth=2)
+                
+                # Agregar L/R y el target especial al ciclo
+                cycle_nodes.add(next_idx)
+                cycle_nodes.add(special_target)
+                
+                # Verificar si el target especial ya está en el ciclo
+                if special_target in cycle_nodes and special_target != next_idx:
+                    nodes_in_cycles.update(cycle_nodes)
+                    break
+                
+                # Si el target especial está en una unión, seguir por la unión
+                if special_target in unions:
+                    paired_idx = unions[special_target]
+                    if paired_idx in cycle_nodes:
+                        nodes_in_cycles.update(cycle_nodes)
+                        break
+                    cycle_nodes.add(paired_idx)
+                    current_idx = paired_idx
+                else:
+                    current_idx = special_target
+                continue
             
             # Continuar desde el siguiente nodo
             current_idx = next_idx
+    
+    # PASADA FINAL: Asegurar que todos los nodos tengan sus arcos dibujados
+    # Esto es necesario porque algunos arcos pueden no haberse dibujado si los nodos
+    # estaban en diferentes ciclos que se cerraron prematuramente
+    for node_idx in range(n):
+        # Saltar L y R
+        if node_idx == l_idx or node_idx == r_idx:
+            continue
+        
+        # Obtener el target para este nodo
+        target_idx = get_target_node(node_idx)
+        if target_idx is None:
+            continue
+        
+        # Verificar si el arco ya está dibujado
+        arc_key = (node_idx, target_idx)
+        if arc_key not in drawn_arcs:
+            # Dibujar el arco faltante
+            drawn_arcs.add(arc_key)
+            x1, x2 = x_positions[node_idx], x_positions[target_idx]
+            distance = abs(x2 - x1)
+            height = 0.4 if distance > 2 else 0.3
+            _draw_arrow_arc(ax, x1, x2, y_base, height, color='blue', linewidth=2)
+            
+            # Si el target está en una unión, también dibujar el arco desde el nodo pareado si es necesario
+            if target_idx in unions:
+                paired_idx = unions[target_idx]
+                # El arco desde el nodo pareado se dibujará cuando procesemos ese nodo
+                # o ya debería estar dibujado si ese nodo ya fue procesado
 
 
 def _draw_arrow_arc(ax, x1, x2, y_base, height=0.3, color='blue', linewidth=2):
